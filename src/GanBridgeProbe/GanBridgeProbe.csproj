@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>GanBridgeProbe</AssemblyName>
+    <RootNamespace>GanBridgeProbe</RootNamespace>
+    <Version>0.23.0</Version>
+    <InformationalVersion>0.23.0-moyu-gan-bridge</InformationalVersion>
+  </PropertyGroup>
+</Project>
+
+

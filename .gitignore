@@ -1,0 +1,21 @@
+# Local SDK and package caches (needed only on this Windows development PC)
+.tools/
+.cache/
+
+# Build outputs/caches
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+*.log
+*.tmp
+
+# Only the current tested delivery package is versioned.
+outputs/*
+!outputs/GanBridgeProbe-v0.23/
+!outputs/GanBridgeProbe-v0.23/**
+
+# IDE and OS files
+.DS_Store
+Thumbs.db

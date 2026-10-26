@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop rescap">
+  <Identity Name="MagicubeGanBridgeProbe" Publisher="CN=MagicubeGanBridgeProbe" Version="1.0.0.23" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>魔域到GAN BLE连接验证</DisplayName>
+    <PublisherDisplayName>Local test build</PublisherDisplayName>
+    <Description>最小 BLE 连接验证工具，不转发魔方转动。</Description>
+    <Logo>Assets\Square150x150Logo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26200.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="zh-CN" />
+  </Resources>
+  <Applications>
+    <Application Id="App" Executable="GanBridgeProbe.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="魔域到GAN BLE连接验证" Description="扫描 MoYu V10 AI 并发布 GAN Gen2 风格 GATT 测试服务" BackgroundColor="#16324F" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <desktop:Extension Category="windows.fullTrustProcess" Executable="GanBridgeProbe.exe">
+          <desktop:FullTrustProcess />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <DeviceCapability Name="bluetooth" />
+  </Capabilities>
+</Package>
+
+
+
+
+
+
+
