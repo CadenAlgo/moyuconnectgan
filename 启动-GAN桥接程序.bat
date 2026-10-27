@@ -1,11 +1,11 @@
 @echo off
 setlocal
 set "APP_NAME=MagicubeGanBridgeProbe"
-set "TARGET_VERSION=1.0.0.23"
-set "PACKAGE_DIR=%~dp0outputs\GanBridgeProbe-v0.23"
+set "TARGET_VERSION=1.0.0.24"
+set "PACKAGE_DIR=%~dp0outputs\GanBridgeProbe-v0.24-local"
 set "PACKAGE=%PACKAGE_DIR%\GanBridgeProbe.msix"
 
-echo Starting MoYu-to-GAN BLE bridge v0.23...
+echo Starting MoYu-to-GAN BLE bridge v0.24-local...
 
 for /f "usebackq delims=" %%V in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p=Get-AppxPackage -Name '%APP_NAME%' | Select-Object -First 1; if($p){$p.Version}"`) do set "INSTALLED_VERSION=%%V"
 
@@ -33,7 +33,7 @@ if not defined FAMILY (
 )
 
 start "" explorer.exe "shell:AppsFolder\%FAMILY%!App"
-echo Bridge v0.23 started.
+echo Bridge v0.24-local started.
 echo Click the GAN broadcast button in the bridge window.
 
 endlocal

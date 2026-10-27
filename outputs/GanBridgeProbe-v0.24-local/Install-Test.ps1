@@ -12,4 +12,4 @@ $installed = Get-AppxPackage -Name 'MagicubeGanBridgeProbe' | Select-Object -Fir
 if (-not $installed) { throw 'Windows did not report the app as installed.' }
 $target = "shell:AppsFolder\$($installed.PackageFamilyName)!App"
 Start-Process explorer.exe -ArgumentList $target
-Write-Host 'Probe v0.23 installed and launched. .NET runtime is bundled; no separate .NET install is needed.'
+Write-Host 'Probe v0.24 installed and launched. .NET runtime is bundled; no separate .NET install is needed.'

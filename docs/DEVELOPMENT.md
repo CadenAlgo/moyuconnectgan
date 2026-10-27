@@ -2,11 +2,11 @@
 
 ## Current verified state
 
-- Current package: `outputs/GanBridgeProbe-v0.23/GanBridgeProbe.msix`, identity version `1.0.0.23`.
-- The user confirmed on 2026-10-26 that the full setup works in practice.
-- Windows PC name used for advertising: `GAN356IC` (short name; avoid long names because GATT service UUID + name may exceed advertising payload).
+- Current package: `outputs/GanBridgeProbe-v0.24-local/GanBridgeProbe.msix`, identity version `1.0.0.24`.
+- The user confirmed on 2026-10-27 that the full setup works in practice.
+- Windows device name should begin with `GAN` so Cube Station can discover it; keep it short because the GATT service UUID and name share a limited advertisement payload.
 - Current tested phone app: Magicube / CubeStation (魔方星球) Android 6.8.
-- Current source cube: MoYu V10 AI / `WCU_MY32_ADA3`.
+- Current tested source cube: MoYu V10 AI.
 - GAN AES salt is the BLE address observed for the active virtual device; read it from nRF Connect after each fresh advertisement if Windows rotates its private address, then apply it in the `GAN MAC` input before reconnecting CubeStation.
 
 ## Architecture

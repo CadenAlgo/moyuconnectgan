@@ -11,11 +11,14 @@
 *.log
 *.tmp
 
-# Only the current tested delivery package is versioned.
+# Keep only the current tested delivery package in Git.
 outputs/*
-!outputs/GanBridgeProbe-v0.23/
-!outputs/GanBridgeProbe-v0.23/**
+!outputs/GanBridgeProbe-v0.24-local/
+!outputs/GanBridgeProbe-v0.24-local/**
 
 # IDE and OS files
 .DS_Store
 Thumbs.db
+
+# Local emergency recovery helper; not part of the regular release
+恢复-蓝牙适配器并启动-v0.24.bat

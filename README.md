@@ -1,20 +1,20 @@
 # MoYu → GAN BLE Bridge（Windows）
 
-> **当前工作版 / 私有备份**：把魔域 V10 AI 的 BLE 数据转换为 GAN Gen2 风格 GATT 数据，使手机上的“魔方星球（CubeStation）”把 Windows 电脑当作 GAN 智能魔方。项目仍在迭代；此仓库是开发备份，不代表正式发布。
+> **当前已验证版本**：把魔域 V10 AI 的 BLE 数据转换为 GAN Gen2 风格 GATT 数据，使手机上的“魔方星球（CubeStation）”把 Windows 电脑当作 GAN 智能魔方。项目仍在迭代；当前提供的是本地测试签名包，尚非 Microsoft Store 正式发行。
 
 ## 当前验证状态
 
-截至 **2026-10-26**，用户已在实际设备上确认完整流程可用：
+截至 **2026-10-27**，用户已在实际设备上确认完整流程可用：
 
 | 项目 | 当前测试环境 |
 |---|---|
-| 电脑 | Windows 11 x64，系统版本 10.0.26200 |
+| 电脑 | Windows 11 x64 |
 | 电脑 BLE 名称 | `GAN356IC` |
-| 蓝牙 | Realtek Bluetooth Adapter，Central + Peripheral 均支持 |
-| 实体魔方 | 魔域 V10 AI，广播名 `WCU_MY32_ADA3` |
-| 手机 | OPPO Reno14 |
+| 蓝牙 | BLE 适配器支持 Central + Peripheral 角色 |
+| 实体魔方 | 魔域 V10 AI |
+| 手机 | Android 手机 |
 | 手机 App | 魔方星球（CubeStation）Android 6.8 |
-| 当前 Windows 包 | `1.0.0.23`，MSIX 自包含 .NET 运行时 |
+| 当前 Windows 包 | `1.0.0.24`，MSIX 自包含 .NET 运行时 |
 
 已验证的数据链路：
 
@@ -33,13 +33,13 @@ Windows 桥接程序（MoYu A1/A3/A4/A5 → GAN Gen2）
 ## 快速使用（已安装本机）
 
 1. 双击项目根目录的 `启动-GAN桥接程序.bat`。
-2. 确认窗口标题为 **“魔域 → GAN BLE 桥接验证器 v0.23”**。BAT 会检查 MSIX 版本；如果本机不是 `1.0.0.23`，会从 `outputs/GanBridgeProbe-v0.23/` 安装这一版本。
+2. 确认窗口标题为 **“魔域 → GAN BLE 桥接验证器 v0.24-local”**。BAT 会检查 MSIX 版本；如果本机不是 `1.0.0.24`，会从 `outputs/GanBridgeProbe-v0.24-local/` 安装这一版本。
 3. 点击 **“诊断：启动 GAN 广播”**，等待日志出现 `GAN GATT 广播成功`。
 4. 用手机 nRF Connect 扫描设备 `GAN356IC`，确认其服务 UUID 是 `6e400001-b5a3-f393-e0a9-e50e24dc4179`。记下这次扫描显示的地址；只需扫描读地址，不要让 nRF Connect 保持连接。
 5. 在 Windows 程序的 **“GAN MAC（手机看到的地址）”** 输入框填入该地址，点击 **“应用 GAN MAC”**。
 6. 完全退出 nRF Connect；完全退出并重新打开魔方星球，扫描并连接 `GAN356IC`。
 7. 电脑日志出现 `远端通知订阅变化 ... Count=1` 后，在桥接程序点击 **“扫描魔域魔方”**。
-8. 唤醒 `WCU_MY32_ADA3`，选中后点击 **“连接选中的魔方”**。等到日志显示魔域服务连接、通知订阅和面状态同步成功。
+8. 唤醒魔域 V10 AI，在列表中选中对应设备后点击 **“连接选中的魔方”**。等到日志显示魔域服务连接、通知订阅和面状态同步成功。
 9. 转动实体魔方，检查魔方星球中的 GAN 魔方是否跟随转动。
 
 ### 每次连接的关键点
@@ -50,7 +50,7 @@ CubeStation 的魔方连接和桥接程序连接实体魔域是两个独立 BLE 
 
 ## 首次安装（新电脑）
 
-交付文件在 `outputs/GanBridgeProbe-v0.23/`：
+交付文件在 `outputs/GanBridgeProbe-v0.24-local/`：
 
 - `GanBridgeProbe.msix`：Windows 桥接程序；
 - `GanBridgeProbe.cer`：本地测试包的**公钥证书**，不含签名私钥；
@@ -65,7 +65,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Test.ps1
 
 首次信任本地测试证书时，Windows 会请求管理员权限。完成后可以双击项目根目录 BAT 启动。程序包自带 .NET 运行时，不需要额外下载或安装 .NET。
 
-> 安全提醒：这是本地开发签名证书，不是 Microsoft Store 认证证书。仅在你信任本仓库和安装包来源时安装。签名私钥 `.pfx` 和密码只保存在本机 `.cache/signing/`，**绝不能提交到 GitHub**。
+> 证书说明：安装 MSIX 时需要信任 `outputs/GanBridgeProbe-v0.24-local/GanBridgeProbe.cer`。这是随安装包提供的公钥证书；签名私钥 `.pfx` 和密码只保存在开发电脑的 `.cache/signing/`，不在仓库中，也不会提交到 GitHub。
 
 ## 常见问题
 
@@ -79,40 +79,110 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-Test.ps1
 
 ### 日志提示 `AdvertisementStatus=Aborted`
 
-1. 先确认电脑名是短名称 `GAN356IC`，避免长 Local Name 与 128 位 GAN 服务 UUID 挤满传统广播包；
+1. 先确认电脑名以 `GAN` 开头且较短（当前测试名为 `GAN356IC`），避免长 Local Name 与 128 位 GAN 服务 UUID 挤满传统广播包；
 2. 关闭桥接程序并重启 Windows；
-3. 如果仍失败，在 Windows 设备管理器中禁用/启用 Realtek Bluetooth Adapter 后再运行。不要删除 `.tools`、NuGet 缓存或签名证书。
+3. 如果仍失败，在 Windows 设备管理器中禁用/启用蓝牙适配器后再运行。不要删除 `.tools`、NuGet 缓存或签名证书。
 
-旧版开发阶段的改名和蓝牙重置 BAT 已在工作版确认可用后清理，不属于当前交付文件。
+旧版开发阶段的改名和蓝牙重置脚本不属于当前交付流程。
+
+### 扫描列表中的疑似魔域设备
+
+扫描时，名称包含 `WCU`、`MoYu`、`AI-CUBE`，或广播了魔域服务 UUID 的设备会标记为“疑似魔域”。当前开发版本会把所有疑似魔域设备统一放在列表顶部，并按首次发现顺序保持稳定；RSSI 刷新不会让它们在列表中跳来跳去，也不会改变当前选中项。多个疑似设备会一起置顶，方便选择正确的 V10 AI。
 
 ### 不要在 Windows 系统蓝牙设置中配对
 
 手机 App 和 nRF Connect 都应从各自 App 内执行 BLE 扫描/连接。Windows 设置中的系统配对流程不是本桥接程序的测试流程。
 
-## 操作截图（待用户补充）
+## 连接步骤中的截图位置
 
-实际截图由用户后续上传，放到 `docs/screenshots/`，再取消注释或添加 Markdown 图片链接：
+为了方便实际使用，截图不单独占一个章节。你可以在下面每一步执行后，把自己的截图直接插入对应位置。仓库当前不包含真实手机截图。
 
-| 文件名建议 | 截图内容 |
-|---|---|
-| `01-windows-gan-broadcast.png` | Windows 程序显示 `GAN GATT 广播成功` 和广播心跳 |
-| `02-nrf-current-address.png` | nRF Connect 扫描结果：`GAN356IC`、服务 UUID 和当前地址 |
-| `03-apply-gan-mac.png` | 输入当前广播地址并点击“应用 GAN MAC” |
-| `04-cubestation-connect.png` | 魔方星球连接 `GAN356IC` 后的设备界面 |
-| `05-moyu-sync.png` | 魔域实体魔方与手机虚拟魔方同步转动 |
+### 启动 Windows 桥接程序
 
-图片链接示例（截图放入后再启用）：
+双击 `启动-GAN桥接程序.bat`，点击“诊断：启动 GAN 广播”。
 
-```markdown
-![Windows GAN 广播成功](docs/screenshots/01-windows-gan-broadcast.png)
-```
+<!-- 在这里插入截图：Windows 程序显示 GAN GATT 广播成功和广播心跳 -->
+
+### 用 nRF Connect 读取当前 GAN 地址
+
+手机扫描到 `GAN356IC` 后，查看它显示的当前地址。
+
+<!-- 在这里插入截图：nRF Connect 的 GAN356IC 扫描详情、地址和服务 UUID -->
+
+### 在桥接程序中应用 GAN MAC
+
+把 nRF Connect 当前显示的地址填入“GAN MAC（手机看到的地址）”，点击“应用 GAN MAC”。
+
+<!-- 在这里插入截图：GAN MAC 输入框和应用按钮 -->
+
+### 连接魔方星球
+
+完全退出并重新打开魔方星球，扫描并连接 `GAN356IC`。
+
+<!-- 在这里插入截图：魔方星球连接 GAN356IC 的设备页面 -->
+
+### 连接魔域并测试转动
+
+电脑点击“扫描魔域魔方”，选择并连接自己的魔域 V10 AI，然后转动实体魔方。
+
+<!-- 在这里插入截图：魔域实体魔方和魔方星球状态同步 -->
+
+## nRF Connect 下载与使用
+
+本项目使用 **nRF Connect for Mobile** 只做 BLE 扫描和查看广播详情，主要读取 Windows 虚拟 GAN 设备本次广播使用的地址。它不是魔方星球，也不是连接魔域实体魔方的主程序。
+
+### 官方下载渠道
+
+请优先使用 Nordic Semiconductor 官方渠道：
+
+- Nordic 官方产品页：<https://www.nordicsemi.com/Products/Development-tools/nrf-connect-for-mobile>
+- Android Google Play 官方页面：<https://play.google.com/store/apps/details?id=no.nordicsemi.android.mcp>
+- iPhone/iPad App Store 官方页面：<https://apps.apple.com/app/nrf-connect-for-mobile/id1054362403>
+
+如果 Google Play 或 App Store 在所在地区不可用，请从 Nordic 官方产品页查看当前可用的官方分发方式。不要从搜索结果中的不明网站下载修改版 APK，也不要使用来历不明的“蓝牙调试工具”。本项目不随仓库提供 nRF Connect APK。
+
+### Android 首次使用
+
+1. 从 Google Play 安装 **nRF Connect for Mobile**，开发者应显示为 Nordic Semiconductor；
+2. 打开手机系统设置，给 nRF Connect 授予“附近的设备/Bluetooth”权限；Android 某些版本还可能要求位置权限，按系统提示允许即可；
+3. 暂时关闭魔方星球的连接页面，避免两个 App 同时抢占同一个 BLE 连接；
+4. 打开 nRF Connect，进入 **Scanner/扫描** 页面并点击 **SCAN**；
+5. 在列表中找到 `GAN356IC`；本项目对应的服务 UUID 是：
+
+   ```text
+   6e400001-b5a3-f393-e0a9-e50e24dc4179
+   ```
+
+6. 点击该设备的详情/展开区域，记录本次显示的 BLE 地址；
+7. 确认详情中能看到上面的 128 位服务 UUID；
+8. **只读取信息，不点击 CONNECT**。如果误连接了，点击 DISCONNECT 后退出 nRF Connect；
+9. 回到 Windows 桥接程序，把本次扫描显示的地址填入“GAN MAC（手机看到的地址）”，点击“应用 GAN MAC”；
+10. 完全退出 nRF Connect，再重新打开魔方星球连接 `GAN356IC`。
+
+### 如何判断扫描到的是本项目
+
+不要只按名称判断。应该同时确认：
+
+- 名称是 `GAN356IC`；
+- 服务 UUID 是 `6e400001-b5a3-f393-e0a9-e50e24dc4179`；
+- 地址是本次桥接程序启动广播后扫描得到的新地址。
+
+每次重启电脑、重启桥接程序或重新启动广播，都建议重新扫描一次地址，因为 Windows BLE 私有广播地址可能变化。不要把电脑蓝牙适配器地址或旧日志里的地址直接当成当前 GAN MAC。
+
+## 支持范围
+
+当前实际测试和确认的实体魔方只有：
+
+- 魔域 V10 AI；
+
+其他魔域型号、其他 MoYu 型号和其他品牌目前没有实体硬件测试条件，因此不能承诺兼容。具备设备和协议分析能力的使用者可以尝试扩展，但需要自行确认：BLE 服务/特征 UUID、加密密钥派生、数据帧布局、面序和移动编码。提交其他型号的支持前，建议附上脱敏日志和独立测试结果。
 
 ## 项目结构
 
 ```text
 src/GanBridgeProbe/                 C# Windows Forms、BLE 和协议转换源码
 src/build-package.ps1               MSIX 构建/签名脚本
-outputs/GanBridgeProbe-v0.23/       当前可安装包、证书和安装辅助脚本
+outputs/GanBridgeProbe-v0.24-local/       当前可安装包、证书和安装辅助脚本
 docs/DEVELOPMENT.md                  后续开发维护记录
 docs/screenshots/                    用户截图占位目录
 启动-GAN桥接程序.bat                  版本检查并启动当前 MSIX

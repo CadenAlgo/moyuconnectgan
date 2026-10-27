@@ -28,11 +28,13 @@ internal sealed class CubeAdvertisement
     public string Manufacturer { get; set; } = "无";
     public string Services { get; set; } = "无";
     public DateTime SeenAt { get; set; } = DateTime.Now;
+    public long DiscoveryOrder { get; init; }
     public string AddressText => MainForm.FormatAddress(Address);
     public bool LooksLikeMoYu => Name.Contains("WCU", StringComparison.OrdinalIgnoreCase)
         || Name.Contains("MOYU", StringComparison.OrdinalIgnoreCase)
         || Name.Contains("AI-CUBE", StringComparison.OrdinalIgnoreCase)
-        || Name.Contains("AICUBE", StringComparison.OrdinalIgnoreCase);
+        || Name.Contains("AICUBE", StringComparison.OrdinalIgnoreCase)
+        || Services.Contains("0783b03e-7735-b5a0-1760-a305d2795cb0", StringComparison.OrdinalIgnoreCase);
     public override string ToString() => $"{(LooksLikeMoYu ? "[疑似魔域] " : "")}{Name}  {AddressText}  RSSI {Rssi} dBm  厂商数据 {Manufacturer}";
 }
 
@@ -109,6 +111,7 @@ internal sealed class MainForm : Form
     private GattLocalCharacteristic? _commandCharacteristic;
     private GattLocalCharacteristic? _stateCharacteristic;
     private readonly Dictionary<ulong, CubeAdvertisement> _seen = new();
+    private long _nextDiscoveryOrder;
     private SplitContainer? _splitContainer;
     private bool _closing;
     private System.Windows.Forms.Timer? _advWatchdog;
@@ -118,7 +121,7 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "魔域 → GAN BLE 桥接验证器 v0.23";
+        Text = "魔域 → GAN BLE 桥接验证器 v0.24-local";
         MinimumSize = new Size(1000, 700);
         Size = new Size(1240, 850);
         StartPosition = FormStartPosition.CenterScreen;
@@ -1048,7 +1051,7 @@ internal sealed class MainForm : Form
     private void StartScan()
     {
         if (_phoneTestMode) ExitPhoneTestMode();
-        StopScan(); _devices.Items.Clear(); _seen.Clear();
+        StopScan(); _devices.Items.Clear(); _seen.Clear(); _nextDiscoveryOrder = 0;
         try
         {
             var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Active, AllowExtendedAdvertisements = false };
@@ -1072,26 +1075,49 @@ internal sealed class MainForm : Form
         }
         catch { manufacturer = "读取失败"; }
         var services = string.Join(",", args.Advertisement.ServiceUuids.Select(x => x.ToString()));
-        var item = new CubeAdvertisement { Address = args.BluetoothAddress, Name = string.IsNullOrWhiteSpace(args.Advertisement.LocalName) ? "(无名称)" : args.Advertisement.LocalName, Rssi = args.RawSignalStrengthInDBm, Manufacturer = manufacturer, Services = string.IsNullOrWhiteSpace(services) ? "无" : services };
+        var item = new CubeAdvertisement { Address = args.BluetoothAddress, Name = string.IsNullOrWhiteSpace(args.Advertisement.LocalName) ? "(无名称)" : args.Advertisement.LocalName, Rssi = args.RawSignalStrengthInDBm, Manufacturer = manufacturer, Services = string.IsNullOrWhiteSpace(services) ? "无" : services, DiscoveryOrder = ++_nextDiscoveryOrder };
         SafeUi(() =>
         {
             if (_seen.TryGetValue(item.Address, out var existing))
             {
-                existing.SeenAt = DateTime.Now; existing.Name = item.Name; existing.Rssi = item.Rssi; existing.Manufacturer = item.Manufacturer; existing.Services = item.Services;
-                var index = _devices.Items.IndexOf(existing);
-                if (index >= 0)
-                {
-                    var wasSelected = ReferenceEquals(_devices.SelectedItem, existing);
-                    _devices.Items[index] = existing;
-                    if (wasSelected) _devices.SelectedItem = existing;
-                }
+                existing.Name = item.Name; existing.Rssi = item.Rssi; existing.Manufacturer = item.Manufacturer; existing.Services = item.Services;
+                ReorderDeviceList(existing);
             }
             else
             {
-                _seen[item.Address] = item; _devices.Items.Add(item);
-                if (item.LooksLikeMoYu || item.Services.Contains(MoYuService.ToString(), StringComparison.OrdinalIgnoreCase)) Log($"发现疑似魔域设备：{item}");
+                _seen[item.Address] = item;
+                _devices.Items.Add(item);
+                ReorderDeviceList(item);
+                if (IsLikelyMoYu(item)) Log($"发现疑似魔域设备：{item}");
             }
         });
+    }
+
+    private static bool IsLikelyMoYu(CubeAdvertisement item) =>
+        item.LooksLikeMoYu || item.Services.Contains(MoYuService.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Keep all likely MoYu devices in a stable first group. Within each group,
+    /// preserve discovery order instead of sorting by RSSI, because RSSI changes
+    /// on every advertisement and otherwise makes the selected item jump.
+    /// </summary>
+    private void ReorderDeviceList(CubeAdvertisement changed)
+    {
+        var selected = _devices.SelectedItem as CubeAdvertisement;
+        var ordered = _seen.Values
+            .OrderByDescending(IsLikelyMoYu)
+            .ThenBy(x => x.DiscoveryOrder)
+            .ThenBy(x => x.Address)
+            .ToList();
+        _devices.BeginUpdate();
+        try
+        {
+            _devices.Items.Clear();
+            foreach (var item in ordered) _devices.Items.Add(item);
+            if (selected is not null && _devices.Items.Contains(selected)) _devices.SelectedItem = selected;
+            else if (_devices.Items.Contains(changed)) _devices.SelectedItem = changed;
+        }
+        finally { _devices.EndUpdate(); }
     }
 
     private void OnWatcherStopped(BluetoothLEAdvertisementWatcher sender, BluetoothLEAdvertisementWatcherStoppedEventArgs args) => SafeUi(() => Log($"BLE 扫描停止：{args.Error}"));
