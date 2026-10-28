@@ -121,6 +121,7 @@ internal sealed class MainForm : Form
     private bool _advertisementRecoveryInProgress;
     private DateTime _nextAdvertisementRecoveryUtc;
     private int _advertisementRecoveryFailures;
+    private int _providerRebuildAttempts;
     private Guid _activeServiceId;
     private Guid _activeWriteId;
     private Guid _activeReadId;
@@ -301,7 +302,7 @@ internal sealed class MainForm : Form
         return zeros >= 12;
     }
 
-    private async Task StartServerAsync(Guid serviceId, Guid writeId, Guid readId, string kind)
+    private async Task StartServerAsync(Guid serviceId, Guid writeId, Guid readId, string kind, bool forceNonDiscoverable = false)
     {
         if (_serverStarting)
         {
@@ -310,6 +311,8 @@ internal sealed class MainForm : Form
         }
 
         _serverStarting = true;
+        var scheduleProviderRebuild = false;
+        var advertisementFailed = false;
         _activeServiceId = serviceId;
         _activeWriteId = writeId;
         _activeReadId = readId;
@@ -395,7 +398,7 @@ internal sealed class MainForm : Form
             var adv = new GattServiceProviderAdvertisingParameters
             {
                 IsConnectable = adapter.IsPeripheralRoleSupported,
-                IsDiscoverable = true
+                IsDiscoverable = !forceNonDiscoverable
             };
             _advParameters = adv;
             _advWanted = true;
@@ -406,7 +409,10 @@ internal sealed class MainForm : Form
             var advertisingStarted = await StartAdvertisingWithFallbackAsync(provider, adv);
             Log($"StartAdvertising 最终状态：AdvertisementStatus={provider.AdvertisementStatus}");
             if (!advertisingStarted)
+            {
+                advertisementFailed = true;
                 throw new InvalidOperationException($"广播多次启动失败，最终状态={provider.AdvertisementStatus}。请查看每次尝试对应的状态与错误码。");
+            }
 
             try
             {
@@ -438,6 +444,7 @@ internal sealed class MainForm : Form
             }
 
             _nextAdvertisementRecoveryUtc = DateTime.MinValue;
+            _providerRebuildAttempts = 0;
             if (_pureMode) { StopAdvWatchdog(); Log("纯净模式：不启动广播心跳，也不会自动重启广播；本程序当前没有任何主动发送动作。"); }
             else StartAdvWatchdog();
             Log($"开始对外广播，本机名称={Environment.MachineName}。请只用手机 Cube Station 扫描，不要同时启动本机魔域扫描。");
@@ -446,6 +453,11 @@ internal sealed class MainForm : Form
         {
             Log($"{kind} GATT 启动失败：{Describe(ex)}");
             StopServer();
+            if (advertisementFailed && !forceNonDiscoverable && _providerRebuildAttempts < 1 && !_closing)
+            {
+                _providerRebuildAttempts++;
+                scheduleProviderRebuild = true;
+            }
         }
         finally
         {
@@ -455,8 +467,18 @@ internal sealed class MainForm : Form
                 _startGan.Enabled = _provider is null || !IsAdvertisingStarted(_provider);
                 _startGeneric.Enabled = _provider is null || !IsAdvertisingStarted(_provider);
             }
+            if (scheduleProviderRebuild && !_closing)
+                _ = RebuildProviderAfterAdvertisementFailureAsync(serviceId, writeId, readId, kind);
         }
     }
+
+    private async Task RebuildProviderAfterAdvertisementFailureAsync(Guid serviceId, Guid writeId, Guid readId, string kind)
+    {
+        Log("初次广播在 Windows GATT provider 上立即中止；释放旧 provider 后，以 IsDiscoverable=false 重建一次，避免复用 Aborted/Created 状态对象。");
+        await Task.Delay(1200);
+        if (!_closing) await StartServerAsync(serviceId, writeId, readId, kind, forceNonDiscoverable: true);
+    }
+
     private static bool IsAdvertisingStarted(GattServiceProvider provider) =>
         provider.AdvertisementStatus is GattServiceProviderAdvertisementStatus.Started or
         GattServiceProviderAdvertisementStatus.StartedWithoutAllAdvertisementData;
@@ -490,15 +512,27 @@ internal sealed class MainForm : Form
             };
             _advParameters = parameters;
 
-            if (provider.AdvertisementStatus != GattServiceProviderAdvertisementStatus.Stopped)
+            var currentStatus = provider.AdvertisementStatus;
+            if (IsAdvertisingStarted(provider))
             {
                 try { provider.StopAdvertising(); }
-                catch (Exception ex) { Log($"广播第 {i + 1} 次尝试前停止旧请求提示：{Describe(ex)}"); }
+                catch (Exception ex) { Log($"广播第 {i + 1} 次尝试前停止活动广播提示：{Describe(ex)}"); }
                 if (!await WaitForAdvertisementStoppedAsync(provider, 2500))
                 {
                     Log($"广播第 {i + 1} 次尝试取消失败：停止等待超时，Provider={provider.AdvertisementStatus}；不叠加新的 StartAdvertising 请求。");
                     continue;
                 }
+            }
+            else if (currentStatus == GattServiceProviderAdvertisementStatus.Aborted)
+            {
+                // Aborted and Created do not represent an active advertising request.
+                // StopAdvertising is invalid in these states (E_ILLEGAL_METHOD_CALL).
+                Log($"Provider 当前为 Aborted；没有活动请求需要停止，等待射频栈释放后直接重试。");
+                await Task.Delay(800);
+            }
+            else
+            {
+                Log($"Provider 当前为 {currentStatus}；没有活动请求需要停止，直接调用 StartAdvertising。");
             }
 
             try
@@ -527,11 +561,23 @@ internal sealed class MainForm : Form
     private static async Task<bool> WaitForAdvertisingStartedAsync(GattServiceProvider provider, int timeoutMs)
     {
         var deadline = Environment.TickCount64 + timeoutMs;
+        var abortedAt = -1L;
         while (Environment.TickCount64 < deadline)
         {
             if (IsAdvertisingStarted(provider)) return true;
-            if (provider.AdvertisementStatus == GattServiceProviderAdvertisementStatus.Aborted) return false;
-            await Task.Delay(100);
+            if (provider.AdvertisementStatus == GattServiceProviderAdvertisementStatus.Aborted)
+            {
+                // Windows can emit a transient Aborted event immediately before the
+                // same request transitions to Started. Give the stack a short grace
+                // window instead of issuing a competing StartAdvertising call.
+                if (abortedAt < 0) abortedAt = Environment.TickCount64;
+                if (Environment.TickCount64 - abortedAt >= 1500) return false;
+            }
+            else if (provider.AdvertisementStatus != GattServiceProviderAdvertisementStatus.Created)
+            {
+                abortedAt = -1;
+            }
+            await Task.Delay(50);
         }
         return IsAdvertisingStarted(provider);
     }
@@ -938,7 +984,8 @@ internal sealed class MainForm : Form
         {
             try
             {
-                if (provider.AdvertisementStatus != GattServiceProviderAdvertisementStatus.Stopped) provider.StopAdvertising();
+                if (IsAdvertisingStarted(provider)) provider.StopAdvertising();
+                else Log($"Provider 当前为 {provider.AdvertisementStatus}；没有活动广播，不调用 StopAdvertising。");
             }
             catch (Exception ex) { Log($"停止 GATT 广播时提示：{Describe(ex)}"); }
             try { if (_commandCharacteristic is not null) { _commandCharacteristic.WriteRequested -= OnGattWriteRequested; _commandCharacteristic.ReadRequested -= OnGattReadRequested; } } catch { }
