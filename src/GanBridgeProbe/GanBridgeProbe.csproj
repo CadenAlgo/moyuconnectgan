@@ -9,8 +9,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>GanBridgeProbe</AssemblyName>
     <RootNamespace>GanBridgeProbe</RootNamespace>
-    <Version>0.25.0</Version>
-    <InformationalVersion>0.25.0-moyu-gan-bridge</InformationalVersion>
+    <Version>0.26.0</Version>
+    <InformationalVersion>0.26.0-moyu-gan-bridge</InformationalVersion>
   </PropertyGroup>
 </Project>
 

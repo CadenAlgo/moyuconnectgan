@@ -130,7 +130,7 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "魔域 → GAN BLE 桥接验证器 v0.25-local";
+        Text = "魔域 → GAN BLE 桥接验证器 v0.26-local";
         MinimumSize = new Size(1000, 700);
         Size = new Size(1240, 850);
         StartPosition = FormStartPosition.CenterScreen;
@@ -293,8 +293,18 @@ internal sealed class MainForm : Form
     /// A valid GAN command frame starts with 0x04/0x05/0x09/0x0A and is almost
     /// entirely zero. Random AES output almost never satisfies this.
     /// </summary>
+    private static readonly byte[] GanResetCommand =
+    {
+        0x0A, 0x05, 0x39, 0x77, 0x00, 0x00, 0x01, 0x23,
+        0x45, 0x67, 0x89, 0xAB, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00
+    };
+
+    private static bool IsGanResetCommand(ReadOnlySpan<byte> plain) => plain.SequenceEqual(GanResetCommand);
+
     private static bool LooksLikeGanCommand(byte[] plain)
     {
+        if (IsGanResetCommand(plain)) return true;
         if (plain.Length < 16) return false;
         if (plain[0] is not (0x04 or 0x05 or 0x09 or 0x0A)) return false;
         var zeros = 0;
@@ -743,6 +753,12 @@ internal sealed class MainForm : Form
     {
         try
         {
+            if (IsGanResetCommand(plain))
+            {
+                await ResetGanStateAsync();
+                return;
+            }
+
             if (opcode == 0x04)
             {
                 _ganFaceletsRequested = true;
@@ -1545,6 +1561,24 @@ internal sealed class MainForm : Form
         {
             Log($"忽略未处理的魔域消息 0x{plain[0]:X2}。");
         }
+    }
+
+    private async Task ResetGanStateAsync()
+    {
+        var hadPhysicalBaseline = _moyuHasBaseline && _sourceCube is not null;
+        _sourceCube ??= new CubeState();
+        _sourceCube.Reset();
+        _ganMoveWindow.Clear();
+        _lastMoyuMoveCode = 0xFF;
+        if (hadPhysicalBaseline)
+            _ganVirtualCounter = _moyuLastCounter;
+        _ganFaceletsRequested = true;
+
+        Log($"收到 GAN 状态重置命令 0x0A：已将虚拟 CubeState 重置为复原状态；counter={_ganVirtualCounter}; physicalBaseline={hadPhysicalBaseline}");
+        if (_ganCrypto is not null && _stateCharacteristic is not null)
+            await SendGanFaceletsAsync();
+        else
+            Log("GAN 状态重置已应用到本地状态，但当前没有可用的手机通知通道；等待手机重新订阅后发送复原状态。");
     }
 
     private async Task SendGanStartupStateAsync(string reason)
