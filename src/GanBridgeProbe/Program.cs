@@ -117,11 +117,19 @@ internal sealed class MainForm : Form
     private System.Windows.Forms.Timer? _advWatchdog;
     private GattServiceProviderAdvertisingParameters? _advParameters;
     private bool _advWanted;
+    private bool _serverStarting;
+    private bool _advertisementRecoveryInProgress;
+    private DateTime _nextAdvertisementRecoveryUtc;
+    private int _advertisementRecoveryFailures;
+    private Guid _activeServiceId;
+    private Guid _activeWriteId;
+    private Guid _activeReadId;
+    private string _activeServerKind = "GAN";
     private int _advHeartbeat;
 
     public MainForm()
     {
-        Text = "魔域 → GAN BLE 桥接验证器 v0.24-local";
+        Text = "魔域 → GAN BLE 桥接验证器 v0.25-local";
         MinimumSize = new Size(1000, 700);
         Size = new Size(1240, 850);
         StartPosition = FormStartPosition.CenterScreen;
@@ -295,29 +303,55 @@ internal sealed class MainForm : Form
 
     private async Task StartServerAsync(Guid serviceId, Guid writeId, Guid readId, string kind)
     {
-        if (_provider is not null)
+        if (_serverStarting)
         {
-            var oldStatus = _provider.AdvertisementStatus;
-            if (oldStatus is GattServiceProviderAdvertisementStatus.Started or GattServiceProviderAdvertisementStatus.StartedWithoutAllAdvertisementData)
+            Log($"{kind} GATT 服务启动正在进行，请稍候；忽略重复启动请求。");
+            return;
+        }
+
+        _serverStarting = true;
+        _activeServiceId = serviceId;
+        _activeWriteId = writeId;
+        _activeReadId = readId;
+        _activeServerKind = kind;
+        _startGan.Enabled = false;
+        _startGeneric.Enabled = false;
+        try
+        {
+            if (_provider is not null && IsAdvertisingStarted(_provider))
             {
                 Log("已有 GATT 服务正在广播，请先停止当前广播。");
                 return;
             }
-            Log($"发现旧 GATT provider：Status={oldStatus}；先释放旧实例再创建。");
-            try { _provider.StopAdvertising(); } catch { }
-            _provider = null;
-            _advParameters = null;
-            await Task.Delay(1000);
-        }
-        try
-        {
-            _startGan.Enabled = false; _startGeneric.Enabled = false;
+
+            if (_provider is not null)
+            {
+                Log($"发现未处于广播状态的旧 GATT provider：Status={_provider.AdvertisementStatus}；先完整释放旧服务。");
+                StopServer();
+                await Task.Delay(700);
+            }
+
+            if (_watcher is not null)
+            {
+                Log("启动 GATT 外设前先停止本机 BLE 扫描，避免同一适配器 Central 扫描与 Peripheral 广播争用。");
+                StopScan();
+                await Task.Delay(300);
+            }
+            if (_rawPublisher is not null)
+            {
+                Log("启动 GATT 外设前停止诊断用原始广播，释放适配器广播资源。");
+                StopRawAdvertisement();
+            }
+            StopVendorAdvertisement();
+
             Log($"正在创建 {kind} GATT 服务：Service={serviceId}");
             var result = await GattServiceProvider.CreateAsync(serviceId);
             Log($"CreateAsync：Error={result.Error}; ProviderNull={result.ServiceProvider is null}");
             if (result.Error != BluetoothError.Success || result.ServiceProvider is null)
                 throw new InvalidOperationException($"CreateAsync 失败：BluetoothError={result.Error}");
+
             var provider = result.ServiceProvider;
+            _provider = provider; // publish immediately so a later setup failure can release it
             GattLocalCharacteristic? write = null;
             if (writeId != Guid.Empty)
             {
@@ -331,7 +365,11 @@ internal sealed class MainForm : Form
                 if (writeResult.Error != BluetoothError.Success || writeResult.Characteristic is null)
                     throw new InvalidOperationException($"命令特征创建失败：BluetoothError={writeResult.Error}");
                 write = writeResult.Characteristic;
+                _commandCharacteristic = write;
+                write.WriteRequested += OnGattWriteRequested;
+                write.ReadRequested += OnGattReadRequested;
             }
+
             var readResult = await provider.Service.CreateCharacteristicAsync(readId, new GattLocalCharacteristicParameters
             {
                 CharacteristicProperties = GattCharacteristicProperties.Read | GattCharacteristicProperties.Notify,
@@ -341,33 +379,35 @@ internal sealed class MainForm : Form
             Log($"状态特征 CreateCharacteristicAsync：Error={readResult.Error}; Null={readResult.Characteristic is null}");
             if (readResult.Error != BluetoothError.Success || readResult.Characteristic is null)
                 throw new InvalidOperationException($"状态特征创建失败：BluetoothError={readResult.Error}");
-            var read = readResult.Characteristic!;
-            if (write is not null) Log($"GAN 命令特征诊断：{DescribeCharacteristic(write)}");
+            var read = readResult.Characteristic;
+            _stateCharacteristic = read;
+            Log($"GAN 命令特征诊断：{(write is null ? "无（诊断服务）" : DescribeCharacteristic(write))}");
             Log($"GAN 状态特征诊断：{DescribeCharacteristic(read)}");
-            Log("如果手机已完成 GATT 通知订阅，状态特征的 SubscribedClients 应大于 0；Chrome 的扫描列表本身不代表已连接。");
-            _provider = provider; _commandCharacteristic = write; _stateCharacteristic = read;
-            if (write is not null)
-            {
-                write.WriteRequested += OnGattWriteRequested;
-                write.ReadRequested += OnGattReadRequested;
-            }
+            Log("如果手机已完成 GATT 通知订阅，状态特征的 SubscribedClients 应大于 0；扫描列表本身不代表已连接。");
+
             read.ReadRequested += OnGattReadRequested;
             read.SubscribedClientsChanged += OnGattSubscribersChanged;
             provider.AdvertisementStatusChanged += OnAdvertisementStatusChanged;
+
             var adapter = await BluetoothAdapter.GetDefaultAsync();
+            if (adapter is null)
+                throw new InvalidOperationException("BluetoothAdapter.GetDefaultAsync() 返回 null，无法发布 GATT 广播。");
             var adv = new GattServiceProviderAdvertisingParameters
             {
-                IsConnectable = adapter?.IsPeripheralRoleSupported == true,
+                IsConnectable = adapter.IsPeripheralRoleSupported,
                 IsDiscoverable = true
             };
             _advParameters = adv;
-            var adapterAddressText = adapter is null ? "unknown" : FormatAddress(adapter.BluetoothAddress);
-            Log($"BLE 外设诊断：Peripheral={adapter?.IsPeripheralRoleSupported}; Central={adapter?.IsCentralRoleSupported}; Address={adapterAddressText}");
+            _advWanted = true;
+            Log($"BLE 外设诊断：Peripheral={adapter.IsPeripheralRoleSupported}; Central={adapter.IsCentralRoleSupported}; Address={FormatAddress(adapter.BluetoothAddress)}");
+            if (!adv.IsConnectable)
+                throw new InvalidOperationException("当前蓝牙适配器报告 Peripheral=False，不能创建可连接的 GATT 外设广播。");
             Log($"StartAdvertising 参数：IsConnectable={adv.IsConnectable}; IsDiscoverable={adv.IsDiscoverable}; ServiceData=null");
             var advertisingStarted = await StartAdvertisingWithFallbackAsync(provider, adv);
-            Log($"StartAdvertising 后：AdvertisementStatus={provider.AdvertisementStatus}");
+            Log($"StartAdvertising 最终状态：AdvertisementStatus={provider.AdvertisementStatus}");
             if (!advertisingStarted)
-                throw new InvalidOperationException($"广播状态为 {provider.AdvertisementStatus}；已尝试标准可发现模式和兼容回退模式。");
+                throw new InvalidOperationException($"广播多次启动失败，最终状态={provider.AdvertisementStatus}。请查看每次尝试对应的状态与错误码。");
+
             try
             {
                 var adapter2 = await BluetoothAdapter.GetDefaultAsync();
@@ -381,11 +421,12 @@ internal sealed class MainForm : Form
                     _ganCryptoMac = cryptoMac;
                     _ganCrypto = new GanCrypto(cryptoMac);
                     _ganReady = true;
-                    Log($"GAN Gen2 加密器已初始化：加密 MAC={FormatMac(cryptoMac)}（适配器地址={FormatAddress(addr)}）。手机端必须用同一个 MAC 派生密钥，否则它收到的通知会是乱码。");
+                    Log($"GAN Gen2 加密器已初始化：加密 MAC={FormatMac(cryptoMac)}（适配器地址={FormatAddress(addr)}）。手机端必须用同一个 MAC 派生密钥，否则通知内容无法正确解密。");
                     Log($"GAN 派生密钥指纹：key[0..3]={Convert.ToHexString(_ganCrypto.Key.AsSpan(0, 4))}; iv[0..3]={Convert.ToHexString(_ganCrypto.Iv.AsSpan(0, 4))}");
                 }
             }
             catch (Exception ex) { Log($"加密器初始化失败：{Describe(ex)}"); _ganReady = false; }
+
             _serverStatus.Text = $"{kind} 广播：{provider.AdvertisementStatus}";
             _stopServer.Enabled = true;
             Log($"{kind} GATT 广播成功。若手机能连接，日志会出现读取、写入或通知订阅。");
@@ -395,18 +436,27 @@ internal sealed class MainForm : Form
                 Log($"GAN 参考身份：name={GanAdvertisedName}; hardware=GAN356iC; firmware=1.0; CIC=0x{GanCompanyIdentifier:X4}。Windows GattServiceProvider 的可连接广播名称仍由电脑名决定（当前 {Environment.MachineName}）。");
                 Log("GAN 真机辅助广播不会自动启动；如需单独诊断，请手动点击“诊断：厂商数据广播（GAN 真机格式）”。");
             }
-            _advWanted = true;
+
+            _nextAdvertisementRecoveryUtc = DateTime.MinValue;
             if (_pureMode) { StopAdvWatchdog(); Log("纯净模式：不启动广播心跳，也不会自动重启广播；本程序当前没有任何主动发送动作。"); }
             else StartAdvWatchdog();
-            Log($"开始对外广播，本机名称={Environment.MachineName}。现在请只用手机 Cube Station 扫描，先不要点本程序的“扫描魔域魔方”。");
+            Log($"开始对外广播，本机名称={Environment.MachineName}。请只用手机 Cube Station 扫描，不要同时启动本机魔域扫描。");
         }
         catch (Exception ex)
         {
             Log($"{kind} GATT 启动失败：{Describe(ex)}");
             StopServer();
         }
+        finally
+        {
+            _serverStarting = false;
+            if (!_closing)
+            {
+                _startGan.Enabled = _provider is null || !IsAdvertisingStarted(_provider);
+                _startGeneric.Enabled = _provider is null || !IsAdvertisingStarted(_provider);
+            }
+        }
     }
-
     private static bool IsAdvertisingStarted(GattServiceProvider provider) =>
         provider.AdvertisementStatus is GattServiceProviderAdvertisementStatus.Started or
         GattServiceProviderAdvertisementStatus.StartedWithoutAllAdvertisementData;
@@ -423,29 +473,78 @@ internal sealed class MainForm : Form
         GattServiceProvider provider,
         GattServiceProviderAdvertisingParameters requested)
     {
-        provider.StartAdvertising(requested);
-        await Task.Delay(1200);
-        if (IsAdvertisingStarted(provider)) return true;
-
-        Log($"标准广播被系统中止：Status={provider.AdvertisementStatus}。尝试兼容回退：IsConnectable=true; IsDiscoverable=false。");
-        try
+        var attempts = new[]
         {
-            if (provider.AdvertisementStatus != GattServiceProviderAdvertisementStatus.Stopped)
-                provider.StopAdvertising();
-        }
-        catch (Exception ex) { Log($"停止失败广播时提示：{Describe(ex)}"); }
-        await Task.Delay(800);
-
-        var fallback = new GattServiceProviderAdvertisingParameters
-        {
-            IsConnectable = requested.IsConnectable,
-            IsDiscoverable = false
+            (Discoverable: requested.IsDiscoverable, TimeoutMs: 3500),
+            (Discoverable: false, TimeoutMs: 4500),
+            (Discoverable: false, TimeoutMs: 5500)
         };
-        _advParameters = fallback;
-        provider.StartAdvertising(fallback);
-        await Task.Delay(1500);
-        Log($"兼容回退广播状态：{provider.AdvertisementStatus}");
+
+        for (var i = 0; i < attempts.Length; i++)
+        {
+            var attempt = attempts[i];
+            var parameters = new GattServiceProviderAdvertisingParameters
+            {
+                IsConnectable = requested.IsConnectable,
+                IsDiscoverable = attempt.Discoverable
+            };
+            _advParameters = parameters;
+
+            if (provider.AdvertisementStatus != GattServiceProviderAdvertisementStatus.Stopped)
+            {
+                try { provider.StopAdvertising(); }
+                catch (Exception ex) { Log($"广播第 {i + 1} 次尝试前停止旧请求提示：{Describe(ex)}"); }
+                if (!await WaitForAdvertisementStoppedAsync(provider, 2500))
+                {
+                    Log($"广播第 {i + 1} 次尝试取消失败：停止等待超时，Provider={provider.AdvertisementStatus}；不叠加新的 StartAdvertising 请求。");
+                    continue;
+                }
+            }
+
+            try
+            {
+                Log($"GATT 广播启动尝试 {i + 1}/{attempts.Length}：IsConnectable={parameters.IsConnectable}; IsDiscoverable={parameters.IsDiscoverable}; 当前状态={provider.AdvertisementStatus}");
+                provider.StartAdvertising(parameters);
+            }
+            catch (Exception ex)
+            {
+                Log($"GATT 广播启动尝试 {i + 1} 的 StartAdvertising 抛出异常：{Describe(ex)}");
+                continue;
+            }
+
+            var started = await WaitForAdvertisingStartedAsync(provider, attempt.TimeoutMs);
+            Log($"GATT 广播启动尝试 {i + 1} 结果：Status={provider.AdvertisementStatus}; Started={started}");
+            if (started)
+            {
+                _advParameters = parameters;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<bool> WaitForAdvertisingStartedAsync(GattServiceProvider provider, int timeoutMs)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (IsAdvertisingStarted(provider)) return true;
+            if (provider.AdvertisementStatus == GattServiceProviderAdvertisementStatus.Aborted) return false;
+            await Task.Delay(100);
+        }
         return IsAdvertisingStarted(provider);
+    }
+
+    private static async Task<bool> WaitForAdvertisementStoppedAsync(GattServiceProvider provider, int timeoutMs)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (provider.AdvertisementStatus == GattServiceProviderAdvertisementStatus.Stopped) return true;
+            await Task.Delay(100);
+        }
+        return provider.AdvertisementStatus == GattServiceProviderAdvertisementStatus.Stopped;
     }
 
     /// <summary>
@@ -506,7 +605,15 @@ internal sealed class MainForm : Form
 
     private void OnAdvertisementStatusChanged(GattServiceProvider sender, GattServiceProviderAdvertisementStatusChangedEventArgs args)
     {
-        SafeUi(() => Log($"AdvertisementStatusChanged：Status={args.Status}; Error={args.Error}; ProviderStatus={sender.AdvertisementStatus}"));
+        SafeUi(() =>
+        {
+            Log($"AdvertisementStatusChanged：Status={args.Status}; Error={args.Error}; ProviderStatus={sender.AdvertisementStatus}");
+            if (args.Status == GattServiceProviderAdvertisementStatus.Aborted &&
+                ReferenceEquals(sender, _provider) && _advWanted && !_serverStarting)
+            {
+                RequestAdvertisementRecovery("状态事件报告 Aborted");
+            }
+        });
     }
 
     private async void OnGattWriteRequested(GattLocalCharacteristic sender, GattWriteRequestedEventArgs args)
@@ -787,11 +894,7 @@ internal sealed class MainForm : Form
         {
             if (_rawPublisher is not null)
             {
-                _rawPublisher.Stop();
-                _rawPublisher.StatusChanged -= OnRawAdvStatusChanged;
-                _rawPublisher = null;
-                _rawAdv.Text = "诊断：原始广播能力";
-                Log("原始 BLE 广播已停止。");
+                StopRawAdvertisement();
                 return;
             }
             var publisher = new BluetoothLEAdvertisementPublisher();
@@ -803,6 +906,16 @@ internal sealed class MainForm : Form
             Log("步骤3：已调用 Start()，等待状态事件。本测试不使用任何自定义内容，只验证本机适配器能否对外发布 BLE 广播。");
         }
         catch (Exception ex) { Log($"原始 BLE 广播启动失败：{Describe(ex)}"); }
+    }
+
+    private void StopRawAdvertisement()
+    {
+        if (_rawPublisher is null) return;
+        try { _rawPublisher.Stop(); _rawPublisher.StatusChanged -= OnRawAdvStatusChanged; }
+        catch (Exception ex) { Log($"停止原始 BLE 广播时提示：{Describe(ex)}"); }
+        _rawPublisher = null;
+        _rawAdv.Text = "诊断：原始广播能力";
+        Log("原始 BLE 广播已停止。");
     }
 
     private void OnRawAdvStatusChanged(BluetoothLEAdvertisementPublisher sender, BluetoothLEAdvertisementPublisherStatusChangedEventArgs args)
@@ -817,29 +930,37 @@ internal sealed class MainForm : Form
     private void StopServer()
     {
         _advWanted = false;
+        _advertisementRecoveryInProgress = false;
+        _nextAdvertisementRecoveryUtc = DateTime.MinValue;
         StopAdvWatchdog();
-        try { _disProvider = null; } catch { }
-        try
+        var provider = _provider;
+        if (provider is not null)
         {
-            if (_provider is not null)
+            try
             {
-                if (_provider.AdvertisementStatus != GattServiceProviderAdvertisementStatus.Stopped) _provider.StopAdvertising();
-                if (_commandCharacteristic is not null) { _commandCharacteristic.WriteRequested -= OnGattWriteRequested; _commandCharacteristic.ReadRequested -= OnGattReadRequested; }
-                if (_stateCharacteristic is not null) { _stateCharacteristic.ReadRequested -= OnGattReadRequested; _stateCharacteristic.SubscribedClientsChanged -= OnGattSubscribersChanged; }
-                _provider.AdvertisementStatusChanged -= OnAdvertisementStatusChanged;
-                _provider = null; _commandCharacteristic = null; _stateCharacteristic = null;
-
-                _ganReady = false;
-
-                try { _ganCrypto?.Dispose(); } catch { }
-
-                _ganCrypto = null;
-                Log("GATT 服务已停止。");
+                if (provider.AdvertisementStatus != GattServiceProviderAdvertisementStatus.Stopped) provider.StopAdvertising();
             }
+            catch (Exception ex) { Log($"停止 GATT 广播时提示：{Describe(ex)}"); }
+            try { if (_commandCharacteristic is not null) { _commandCharacteristic.WriteRequested -= OnGattWriteRequested; _commandCharacteristic.ReadRequested -= OnGattReadRequested; } } catch { }
+            try { if (_stateCharacteristic is not null) { _stateCharacteristic.ReadRequested -= OnGattReadRequested; _stateCharacteristic.SubscribedClientsChanged -= OnGattSubscribersChanged; } } catch { }
+            try { provider.AdvertisementStatusChanged -= OnAdvertisementStatusChanged; } catch { }
         }
-        catch (Exception ex) { Log($"停止 GATT 服务时提示：{Describe(ex)}"); }
+        _provider = null;
+        _commandCharacteristic = null;
+        _stateCharacteristic = null;
+        _ganReady = false;
+        try { _ganCrypto?.Dispose(); } catch { }
+        _ganCrypto = null;
+        _ganCryptoMac = null;
+        _advParameters = null;
+        _disProvider = null;
         StopVendorAdvertisement();
-        _serverStatus.Text = "广播：未启动"; _stopServer.Enabled = false; _startGan.Enabled = !_closing; _startGeneric.Enabled = !_closing;
+        StopRawAdvertisement();
+        _serverStatus.Text = "广播：未启动";
+        _stopServer.Enabled = false;
+        _startGan.Enabled = !_closing && !_serverStarting;
+        _startGeneric.Enabled = !_closing && !_serverStarting;
+        Log("GATT 服务和广播资源已停止并解除事件订阅。");
     }
 
     private void StartAdvWatchdog()
@@ -862,22 +983,76 @@ internal sealed class MainForm : Form
 
     private void OnAdvWatchdogTick(object? sender, EventArgs e)
     {
-        if (_closing || !_advWanted) return;
+        if (_closing || !_advWanted || _serverStarting || _advertisementRecoveryInProgress) return;
         var provider = _provider;
         if (provider is null) return;
         var status = provider.AdvertisementStatus;
         _advHeartbeat++;
         var scanning = _watcher is not null && _watcher.Status == BluetoothLEAdvertisementWatcherStatus.Started;
-        if (status is GattServiceProviderAdvertisementStatus.Started or GattServiceProviderAdvertisementStatus.StartedWithoutAllAdvertisementData)
+        if (IsAdvertisingStarted(provider))
         {
+            _advertisementRecoveryFailures = 0;
+            _nextAdvertisementRecoveryUtc = DateTime.MinValue;
             var notifyClients = _stateCharacteristic?.SubscribedClients.Count ?? 0;
             var vendorStatus = _vendorPublisher?.Status.ToString() ?? "off";
             Log($"广播心跳 #{_advHeartbeat}：GATT={status}；厂商广播={vendorStatus}；GAN通知订阅数={notifyClients}；本机扫描中={scanning}；魔域={(_moyuDevice is null ? "未连接" : _moyuDevice.ConnectionStatus.ToString())}");
             return;
         }
-        Log($"⚠ 广播心跳 #{_advHeartbeat}：状态={status}；本机扫描中={scanning}。广播被系统中止，正在尝试自动重启……");
-        try { provider.StartAdvertising(_advParameters ?? new GattServiceProviderAdvertisingParameters { IsConnectable = true, IsDiscoverable = true }); }
-        catch (Exception ex) { Log($"自动重启广播失败：{Describe(ex)}"); }
+        Log($"⚠ 广播心跳 #{_advHeartbeat}：状态={status}；本机扫描中={scanning}。GATT 广播已停止/中止。");
+        RequestAdvertisementRecovery($"心跳检测到 {status}");
+    }
+
+    private void RequestAdvertisementRecovery(string reason)
+    {
+        if (_closing || !_advWanted || _serverStarting || _advertisementRecoveryInProgress) return;
+        if (DateTime.UtcNow < _nextAdvertisementRecoveryUtc) return;
+        _ = RecoverAdvertisementAsync(reason);
+    }
+
+    private async Task RecoverAdvertisementAsync(string reason)
+    {
+        if (_closing || !_advWanted || _serverStarting || _advertisementRecoveryInProgress) return;
+        var provider = _provider;
+        if (provider is null) return;
+        _advertisementRecoveryInProgress = true;
+        try
+        {
+            Log($"开始 BLE 广播恢复：原因={reason}; Provider={provider.AdvertisementStatus}。");
+            if (_watcher is not null) { Log("广播异常期间停止本机 BLE 扫描，先释放 Central radio。"); StopScan(); }
+            if (_rawPublisher is not null) StopRawAdvertisement();
+            StopVendorAdvertisement();
+            await Task.Delay(700);
+            if (!ReferenceEquals(provider, _provider) || !_advWanted || _closing) return;
+            var parameters = _advParameters ?? new GattServiceProviderAdvertisingParameters { IsConnectable = true, IsDiscoverable = true };
+            if (await StartAdvertisingWithFallbackAsync(provider, parameters))
+            {
+                _advertisementRecoveryFailures = 0;
+                _nextAdvertisementRecoveryUtc = DateTime.MinValue;
+                _serverStatus.Text = $"GAN 广播：{provider.AdvertisementStatus}";
+                Log($"BLE 广播恢复成功：{provider.AdvertisementStatus}。");
+                return;
+            }
+            _advertisementRecoveryFailures = Math.Min(_advertisementRecoveryFailures + 1, 6);
+            if (_advertisementRecoveryFailures >= 3 && _activeServiceId != Guid.Empty)
+            {
+                Log($"BLE 广播连续 {_advertisementRecoveryFailures} 次恢复失败；释放旧 GATT provider 并重建 {_activeServerKind} 服务，避免 Windows 保留已中止的旧广播句柄。");
+                StopServer();
+                await Task.Delay(1000);
+                if (!_closing) await StartServerAsync(_activeServiceId, _activeWriteId, _activeReadId, _activeServerKind);
+                return;
+            }
+            var cooldownSeconds = Math.Min(5 * (1 << (_advertisementRecoveryFailures - 1)), 60);
+            _nextAdvertisementRecoveryUtc = DateTime.UtcNow.AddSeconds(cooldownSeconds);
+            Log($"BLE 广播恢复失败（连续 {_advertisementRecoveryFailures} 次）；{cooldownSeconds} 秒后再尝试。请检查适配器状态、Windows 蓝牙服务和其他程序占用。");
+        }
+        catch (Exception ex)
+        {
+            _advertisementRecoveryFailures = Math.Min(_advertisementRecoveryFailures + 1, 6);
+            var cooldownSeconds = Math.Min(5 * (1 << (_advertisementRecoveryFailures - 1)), 60);
+            _nextAdvertisementRecoveryUtc = DateTime.UtcNow.AddSeconds(cooldownSeconds);
+            Log($"BLE 广播恢复异常：{Describe(ex)}；{cooldownSeconds} 秒后再尝试。");
+        }
+        finally { _advertisementRecoveryInProgress = false; }
     }
 
     private void TogglePhoneTestMode()
@@ -1054,10 +1229,13 @@ internal sealed class MainForm : Form
         StopScan(); _devices.Items.Clear(); _seen.Clear(); _nextDiscoveryOrder = 0;
         try
         {
-            var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Active, AllowExtendedAdvertisements = false };
+            var scanMode = _provider is not null && IsAdvertisingStarted(_provider)
+                ? BluetoothLEScanningMode.Passive
+                : BluetoothLEScanningMode.Active;
+            var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = scanMode, AllowExtendedAdvertisements = false };
             watcher.Received += OnAdvertisementReceived; watcher.Stopped += OnWatcherStopped; _watcher = watcher; watcher.Start();
             _scan.Enabled = false; _stopScan.Enabled = true;
-            Log("开始 BLE 扫描；未按服务 UUID 过滤。请唤醒 V10 AI，先退出魔域官方 App。注意观察上面“广播心跳”是否继续：若一点扫描心跳就停，说明这个适配器不能同时对外广播和对内扫描。");
+            Log($"开始 BLE {scanMode} 扫描；未按服务 UUID 过滤。GAN 广播活动时使用被动扫描，避免主动 Scan Request 与 Peripheral 广播争用；未广播时使用主动扫描以获取完整设备名称。请唤醒 V10 AI，先退出魔域官方 App。注意观察上面“广播心跳”是否继续。");
         }
         catch (Exception ex) { Log($"BLE 扫描启动失败：{Describe(ex)}"); StopScan(); }
     }
@@ -1398,7 +1576,7 @@ internal sealed class MainForm : Form
         _moyuService = null; _cubeStatus.Text = "魔域连接：未连接"; _cubeStatus.ForeColor = SystemColors.ControlText; _disconnect.Enabled = false;
     }
 
-    private async Task CleanupAsync() { _closing = true; StopScan(); StopAdvWatchdog(); await DisconnectMoYuAsync(); StopServer(); if (_rawPublisher is not null) { _rawPublisher.Stop(); _rawPublisher = null; } StopVendorAdvertisement(); }
+    private async Task CleanupAsync() { _closing = true; StopScan(); StopAdvWatchdog(); await DisconnectMoYuAsync(); StopServer(); }
     private void FailStatus(string message) { _adapterStatus.Text = message; _adapterStatus.ForeColor = Color.DarkRed; }
     private void SafeUi(Action action) { if (IsDisposed || Disposing || _closing) return; if (InvokeRequired) { try { BeginInvoke(action); } catch (InvalidOperationException) { } } else action(); }
     private void Log(string message)

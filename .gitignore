@@ -13,8 +13,8 @@
 
 # Keep only the current tested delivery package in Git.
 outputs/*
-!outputs/GanBridgeProbe-v0.24-local/
-!outputs/GanBridgeProbe-v0.24-local/**
+!outputs/GanBridgeProbe-v0.25-local/
+!outputs/GanBridgeProbe-v0.25-local/**
 
 # IDE and OS files
 .DS_Store

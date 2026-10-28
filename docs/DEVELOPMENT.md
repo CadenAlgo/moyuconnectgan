@@ -2,7 +2,7 @@
 
 ## Current verified state
 
-- Current package: `outputs/GanBridgeProbe-v0.24-local/GanBridgeProbe.msix`, identity version `1.0.0.24`.
+- Current package: `outputs/GanBridgeProbe-v0.25-local/GanBridgeProbe.msix`, identity version `1.0.0.25`.
 - The user confirmed on 2026-10-27 that the full setup works in practice.
 - Windows device name should begin with `GAN` so Cube Station can discover it; keep it short because the GATT service UUID and name share a limited advertisement payload.
 - Current tested phone app: Magicube / CubeStation (魔方星球) Android 6.8.
@@ -20,6 +20,12 @@
 - Local package signing key and password: `.cache/signing/` (never commit).
 - Reference checkouts and reverse-engineering artifacts under `.cache/` are local-only and ignored.
 - Use a fresh output and stage directory because `src/build-package.ps1` refuses to overwrite existing build folders.
+
+## Broadcast reliability notes
+
+- The bridge stops local BLE discovery before starting or recovering the GATT Peripheral advertisement; on the tested Realtek adapter, concurrent Central scanning and Peripheral advertising can otherwise cause intermittent `Aborted` states.
+- The advertisement watchdog is serialized and uses bounded retries with backoff; do not start several diagnostic publishers at the same time.
+- The normal MoYu scan switches to passive mode while the GAN advertisement is active, avoiding extra scan requests; it uses active scanning when the GATT server is stopped so full device names can still be discovered.
 
 ## Known constraints
 

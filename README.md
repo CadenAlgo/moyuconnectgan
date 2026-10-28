@@ -14,7 +14,7 @@
 | 实体魔方 | 魔域 V10 AI |
 | 手机 | Android 手机 |
 | 手机 App | 魔方星球（CubeStation）Android 6.8 |
-| 当前 Windows 包 | `1.0.0.24`，MSIX 自包含 .NET 运行时 |
+| 当前 Windows 包 | `1.0.0.25`，MSIX 自包含 .NET 运行时 |
 
 已验证的数据链路：
 
@@ -34,7 +34,7 @@ Windows 桥接程序（MoYu A1/A3/A4/A5 → GAN Gen2）
 
 可以使用，但这不是 Microsoft Store 应用，第一次在一台新的 Windows 电脑上使用时，**必须同时拿到仓库中的 MSIX 安装包和 .cer 公钥证书**。证书不是私钥，也不是账号密码；它只是让 Windows 信任这个本地测试签名的安装包。
 
-当前版本是 **v0.24-local / MSIX `1.0.0.24`**。MSIX 已经自带 .NET 运行时，普通用户不需要另外安装 .NET、Visual Studio、SDK 或编译环境。
+当前版本是 **v0.25-local / MSIX `1.0.0.25`**。MSIX 已经自带 .NET 运行时，普通用户不需要另外安装 .NET、Visual Studio、SDK 或编译环境。
 
 ### 普通用户需要准备什么
 
@@ -62,26 +62,26 @@ Set-Location .\moyuconnectgan
 如果电脑没有安装 Git，也可以在 GitHub 页面点击 **Code → Download ZIP**，解压后进入项目目录：
 
 - 项目仓库：[CadenAlgo/moyuconnectgan](https://github.com/CadenAlgo/moyuconnectgan)
-- 当前安装目录：`outputs/GanBridgeProbe-v0.24-local/`
-- MSIX：`outputs/GanBridgeProbe-v0.24-local/GanBridgeProbe.msix`
-- 公钥证书：`outputs/GanBridgeProbe-v0.24-local/GanBridgeProbe.cer`
+- 当前安装目录：`outputs/GanBridgeProbe-v0.25-local/`
+- MSIX：`outputs/GanBridgeProbe-v0.25-local/GanBridgeProbe.msix`
+- 公钥证书：`outputs/GanBridgeProbe-v0.25-local/GanBridgeProbe.cer`
 
 下载后请确认这两个文件都存在。可以在 PowerShell 中执行：
 
 ```powershell
-Test-Path .\outputs\GanBridgeProbe-v0.24-local\GanBridgeProbe.msix
-Test-Path .\outputs\GanBridgeProbe-v0.24-local\GanBridgeProbe.cer
+Test-Path .\outputs\GanBridgeProbe-v0.25-local\GanBridgeProbe.msix
+Test-Path .\outputs\GanBridgeProbe-v0.25-local\GanBridgeProbe.cer
 ```
 
 两条命令都应返回 `True`。
 
 ### 校验安装包完整性
 
-仓库同时提供 `outputs/GanBridgeProbe-v0.24-local/SHA256SUMS.txt`。当前已发布文件的 SHA-256 为：
+仓库同时提供 `outputs/GanBridgeProbe-v0.25-local/SHA256SUMS.txt`。当前已发布文件的 SHA-256 为：
 
 ```text
 GanBridgeProbe.msix
-E422BC76A99BBF06A0DB6704C7CBFBDC9EC61A9CD95B040F10B0D9743AEE4B94
+3FB7AFBC7B4D2D10B721AA4E6513C028BD8587E193F7D9E6FB8F852A9572972F
 
 GanBridgeProbe.cer
 4AFE0B3B6161D7A7932A4DBDDFD89A3D10FFE5F7112895020CB0A80954494B56
@@ -90,9 +90,9 @@ GanBridgeProbe.cer
 在 PowerShell 中校验：
 
 ```powershell
-Get-FileHash .\outputs\GanBridgeProbe-v0.24-local\GanBridgeProbe.msix -Algorithm SHA256
-Get-FileHash .\outputs\GanBridgeProbe-v0.24-local\GanBridgeProbe.cer -Algorithm SHA256
-Get-Content .\outputs\GanBridgeProbe-v0.24-local\SHA256SUMS.txt
+Get-FileHash .\outputs\GanBridgeProbe-v0.25-local\GanBridgeProbe.msix -Algorithm SHA256
+Get-FileHash .\outputs\GanBridgeProbe-v0.25-local\GanBridgeProbe.cer -Algorithm SHA256
+Get-Content .\outputs\GanBridgeProbe-v0.25-local\SHA256SUMS.txt
 ```
 
 哈希不一致时不要安装，重新下载并确认下载来源。
@@ -104,7 +104,7 @@ Get-Content .\outputs\GanBridgeProbe-v0.24-local\SHA256SUMS.txt
 打开 PowerShell，进入仓库目录中的发布包目录：
 
 ```powershell
-Set-Location .\outputs\GanBridgeProbe-v0.24-local
+Set-Location .\outputs\GanBridgeProbe-v0.25-local
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-Test.ps1
 ```
 
@@ -195,14 +195,16 @@ Android 安装时请确认开发者显示为 **Nordic Semiconductor**。如果�
 启动-GAN桥接程序.bat
 ```
 
-如果这是第一次启动，脚本会检查安装版本；缺少 `1.0.0.24` 时会从 `outputs/GanBridgeProbe-v0.24-local/` 安装当前包。
+如果这是第一次启动，脚本会检查安装版本；缺少 `1.0.0.25` 时会从 `outputs/GanBridgeProbe-v0.25-local/` 安装当前包。启动前请先关闭旧版桥接程序和 nRF Connect，避免旧 BLE 会话占用适配器。
 
 程序打开后：
 
-1. 确认窗口标题包含 `v0.24-local`；
+1. 确认窗口标题包含 `v0.25-local`；
 2. 确认顶部 BLE 状态中的 `Peripheral=True`；
 3. 点击 **“诊断：启动 GAN 广播”**；
-4. 等待日志出现 **“GAN GATT 广播成功”**，并看到广播心跳持续出现。
+4. 日志会逐次打印“GATT 广播启动尝试”；最终状态应为 `Started` 或 `StartedWithoutAllAdvertisementData`，并出现 **“GAN GATT 广播成功”**。
+
+如果刚才广播失败过：先点击“停止广播”，等待约 3 秒，再按上述步骤重新启动。v0.25 会尝试停止并释放旧广播、等待 Windows 状态收敛后再重试；广播意外中止时还会停止本机扫描并自动恢复。
 
 ### 第 2 步：用 nRF Connect 读取当前 GAN 地址
 
@@ -293,7 +295,7 @@ Android 安装时请确认开发者显示为 **Nordic Semiconductor**。如果�
 
 1. 先确认电脑名以 `GAN` 开头且较短（当前测试名为 `GAN356IC`），避免长 Local Name 与 128 位 GAN 服务 UUID 挤满传统广播包；
 2. 关闭桥接程序并重启 Windows；
-3. 如果仍失败，在 Windows 设备管理器中禁用/启用蓝牙适配器后再运行。不要删除 `.tools`、NuGet 缓存或签名证书。
+3. 如果仍失败，在 Windows 设备管理器中禁用/启用蓝牙适配器后再运行。v0.25 会在广播中止时停止本机扫描、释放诊断广播并自动使用退避重试；如果仍不能恢复，请重启 Windows。不要删除 `.tools`、NuGet 缓存或签名证书。
 
 旧版开发阶段的改名和蓝牙重置脚本不属于当前交付流程。
 
@@ -320,7 +322,9 @@ README 当前没有捆绑真实手机截图，因为不同手机品牌、系统�
 - Windows 用户名、磁盘路径和用户名目录；
 - 任何证书私钥、密码或 `.pfx` 内容。
 
-可以保留错误类型、服务 UUID、通知计数和脱敏后的操作步骤，这些信息更有助于定位问题。\n\n如果安装包或证书的 SHA-256 与 README 不一致，请同时提供下载来源和校验结果；不要把原始未脱敏日志直接公开到 issue。
+可以保留错误类型、服务 UUID、通知计数和脱敏后的操作步骤，这些信息更有助于定位问题。
+
+如果安装包或证书的 SHA-256 与 README 不一致，请同时提供下载来源和校验结果；不要把原始未脱敏日志直接公开到 issue。
 ## 支持范围
 
 当前实际测试和确认的实体魔方只有：
@@ -334,7 +338,7 @@ README 当前没有捆绑真实手机截图，因为不同手机品牌、系统�
 ```text
 src/GanBridgeProbe/                 C# Windows Forms、BLE 和协议转换源码
 src/build-package.ps1               MSIX 构建/签名脚本
-outputs/GanBridgeProbe-v0.24-local/       当前可安装包、证书和安装辅助脚本
+outputs/GanBridgeProbe-v0.25-local/       当前可安装包、证书和安装辅助脚本
 docs/DEVELOPMENT.md                  后续开发维护记录
 docs/screenshots/                    用户截图占位目录
 启动-GAN桥接程序.bat                  版本检查并启动当前 MSIX
