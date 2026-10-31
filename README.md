@@ -113,6 +113,17 @@ git pull
 
 只有在升级过程中提示“发布者证书无效”时，才在新目录的 `outputs/GanBridgeProbe-v0.26-local/` 中运行 `Install-Test.ps1`；通常不需要运行 `Uninstall-Test.ps1`。
 
+## 两个 BAT 启动文件的区别
+
+仓库根目录现在有两个用途不同的 BAT 文件，请不要混用：
+
+| 文件 | 用途 | 什么时候使用 |
+| --- | --- | --- |
+| `启动-GAN桥接程序.bat` | 检查/原位更新 v0.26 MSIX，并启动桥接程序 | 正常使用、电脑重启后启动程序、更新版本 |
+| `修复并启动-GAN桥接程序.bat` | 重置本机 Realtek 蓝牙适配器和 `bthserv`，再启动桥接程序 | 日志反复出现 `Aborted`、`0x8000000E`，或程序重启后仍无法广播 |
+
+修复用的 BAT 和对应的 `修复并启动-GAN桥接程序.ps1` 必须放在同一个仓库根目录中。不要只复制修复 BAT，也不要把 PowerShell 文件单独改名或移动。
+
 ## 第一次安装（新 Windows 电脑）
 
 ### 方法 A：使用仓库提供的安装脚本（推荐）
@@ -307,13 +318,42 @@ Android 安装时请确认开发者显示为 **Nordic Semiconductor**。如果�
 - `已发送 GAN 转动通知 ... clients=1; Status=Success`：Windows BLE 栈已把 20 字节通知交给订阅端；
 - 若仍不更新，先确认本次广播地址填入 `GAN MAC` 后再重新连接魔方星球。GAN Gen2 AES 密钥由 MAC 派生，手机和电脑 MAC 不一致时通知内容无法正确解密。
 
-### 日志提示 `AdvertisementStatus=Aborted`
+### 日志提示 `AdvertisementStatus=Aborted`，或重复启动仍不能广播
 
-1. 先确认电脑名以 `GAN` 开头且较短（当前测试名为 `GAN356IC`），避免长 Local Name 与 128 位 GAN 服务 UUID 挤满传统广播包；
-2. 关闭桥接程序并重启 Windows；
-3. 如果仍失败，在 Windows 设备管理器中禁用/启用蓝牙适配器后再运行。v0.26 会在广播中止时停止本机扫描、释放诊断广播并自动使用退避重试；如果仍不能恢复，请重启 Windows。不要删除 `.tools`、NuGet 缓存或签名证书。
+`Peripheral=True` 只表示适配器报告支持外设角色，不代表此刻 Windows 蓝牙广播栈正常。若日志一直是 `Aborted`，随后 `StartAdvertising` 报 `0x8000000E`，请优先使用仓库根目录的一键 BAT，不需要手动输入命令，也不需要卸载程序。
 
-旧版开发阶段的改名和蓝牙重置脚本不属于当前交付流程。
+#### 推荐方法：双击一键修复 BAT
+
+1. 先退出 CubeStation 的连接页和 nRF Connect 扫描/连接，关闭其他 BLE 工具；
+2. 双击：
+
+   ```text
+   修复并启动-GAN桥接程序.bat
+   ```
+
+3. Windows 弹出管理员权限提示时选择“是”。这是正常现象，因为重置 PnP 蓝牙设备和 `bthserv` 需要管理员权限；
+4. 等待脚本自动结束桥接程序、重启本机 Realtek USB 蓝牙适配器、等待设备恢复到 `OK`、重启蓝牙支持服务，并重新打开 v0.26；
+5. 程序窗口重新出现后，先看顶部状态：如果已经是 `GAN 广播：Started`，并且日志每 2 秒出现 `GATT=Started` 心跳，就不要再次点击启动；如果尚未启动且按钮可用，再点击“诊断：启动 GAN 广播”；
+6. 最后确认状态为 `Started` 或 `StartedWithoutAllAdvertisementData`，再用手机扫描。
+
+BAT 文件只是一个双击入口，实际修复逻辑仍由旁边的 `修复并启动-GAN桥接程序.ps1` 执行。两个文件必须保持在同一目录。脚本完成后会调用正常的 `启动-GAN桥接程序.bat`，所以不会建立第二套安装或启动流程。
+
+#### 命令行备用方法
+
+如果你无法双击 BAT，也可以在仓库根目录打开 PowerShell 手动运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\修复并启动-GAN桥接程序.ps1
+```
+
+#### 重要提醒
+
+- 重置期间蓝牙鼠标、耳机等设备会暂时断开，通常会自动重连；
+- 该脚本只匹配本机 Realtek USB 蓝牙硬件 `USB\VID_13D3&PID_3612`；如果换了适配器，脚本会拒绝操作未识别的设备；
+- 不要连续快速点击广播按钮，也不要同时运行 CubeStation、nRF Connect 和其他 BLE 扫描工具；
+- 不需要卸载应用，不要删除 `.tools/`、`.cache/`、NuGet 缓存、MSIX 安装包或签名证书；
+- 如果 BAT 提示找不到 PowerShell 脚本，请确认 BAT 和 `修复并启动-GAN桥接程序.ps1` 位于同一个仓库根目录；
+- 如果脚本运行后仍然失败，先重启 Windows；重启后仍反复出现 `Aborted` 时，再导出脱敏日志反馈。
 
 ### 扫描列表中的疑似魔域设备
 
@@ -357,7 +397,9 @@ src/build-package.ps1               MSIX 构建/签名脚本
 outputs/GanBridgeProbe-v0.26-local/       当前可安装包、证书和安装辅助脚本
 docs/DEVELOPMENT.md                  后续开发维护记录
 docs/screenshots/                    用户截图占位目录
-启动-GAN桥接程序.bat                  版本检查并启动当前 MSIX
+启动-GAN桥接程序.bat                  检查/原位更新并启动当前 MSIX
+修复并启动-GAN桥接程序.bat             双击一键重置本机蓝牙并启动
+修复并启动-GAN桥接程序.ps1            BAT 调用的管理员修复脚本
 LICENSE                              GPL-3.0
 THIRD_PARTY_NOTICES.md               第三方代码来源和许可证说明
 ```
